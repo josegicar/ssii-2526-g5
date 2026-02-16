@@ -66,15 +66,18 @@ def load_json_secure(filepath, default):
     with open(filepath, "r", encoding="utf-8") as f:
         raw = f.read()
 
-    # Verificar integridad si existe fichero .hmac
+    # Verificar integridad OBLIGATORIA con fichero .hmac
     hmac_file = _hmac_path(filepath)
-    if os.path.exists(hmac_file):
-        with open(hmac_file, "r") as hf:
-            stored_hmac = hf.read().strip()
-        computed_hmac = _file_hmac(raw.encode("utf-8"))
-        if not hmac_mod.compare_digest(stored_hmac, computed_hmac):
-            logger.critical(f"INTEGRIDAD VIOLADA en {filepath} - fichero manipulado")
-            raise RuntimeError(f"Integridad del fichero {filepath} comprometida")
+    if not os.path.exists(hmac_file):
+        logger.critical(f"FICHERO HMAC ELIMINADO para {filepath} - posible ataque")
+        raise RuntimeError(f"Fichero de integridad {hmac_file} no encontrado - posible manipulacion")
+
+    with open(hmac_file, "r") as hf:
+        stored_hmac = hf.read().strip()
+    computed_hmac = _file_hmac(raw.encode("utf-8"))
+    if not hmac_mod.compare_digest(stored_hmac, computed_hmac):
+        logger.critical(f"INTEGRIDAD VIOLADA en {filepath} - fichero manipulado")
+        raise RuntimeError(f"Integridad del fichero {filepath} comprometida")
 
     return json.loads(raw)
 
@@ -289,21 +292,25 @@ def handle_client(conn: socket.socket, addr: tuple):
 
 def process_command(command: str, fields: list, client_ip: str, logged_in_user: str) -> str:
     """Procesa un comando y retorna el payload de respuesta."""
+    try:
+        if command == "REGISTER":
+            return handle_register(fields)
 
-    if command == "REGISTER":
-        return handle_register(fields)
+        elif command == "LOGIN":
+            return handle_login(fields, client_ip)
 
-    elif command == "LOGIN":
-        return handle_login(fields, client_ip)
+        elif command == "TRANSACTION":
+            return handle_transaction(fields, logged_in_user)
 
-    elif command == "TRANSACTION":
-        return handle_transaction(fields, logged_in_user)
+        elif command == "LOGOUT":
+            return handle_logout(logged_in_user)
 
-    elif command == "LOGOUT":
-        return handle_logout(logged_in_user)
+        else:
+            return "ERROR|Comando desconocido"
 
-    else:
-        return "ERROR|Comando desconocido"
+    except RuntimeError as e:
+        logger.critical(f"Operacion rechazada por fallo de integridad: {e}")
+        return "ERROR|Integridad de datos comprometida - operacion rechazada"
 
 
 def handle_register(fields: list) -> str:
