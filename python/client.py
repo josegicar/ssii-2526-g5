@@ -27,6 +27,10 @@ logger = logging.getLogger("client")
 
 # ============================================================
 # Comunicacion segura
+# Tema 2: cada mensaje se envia con MAC + NONCE + SEQ
+# (esquema recomendado: Mensaje + MAC + NONCE).
+# La verificacion es bidireccional: el cliente tambien
+# valida las respuestas del servidor contra MiTM.
 # ============================================================
 
 def send_secure(sock: socket.socket, payload: str, session_key: bytes, seq: int) -> tuple:
@@ -46,7 +50,7 @@ def send_secure(sock: socket.socket, payload: str, session_key: bytes, seq: int)
 
     resp_payload, resp_mac, resp_nonce, resp_seq = unpacked
 
-    # Verificar MAC de la respuesta del servidor (bidireccional)
+    # Verificar MAC de la respuesta del servidor (verificacion bidireccional contra MiTM)
     if not verify_mac(resp_payload, resp_nonce, resp_seq, resp_mac, session_key):
         logger.warning("MAC de respuesta del servidor INVALIDO - posible MiTM")
         print("\n[!] ALERTA: La respuesta del servidor tiene MAC invalido.")
@@ -69,7 +73,8 @@ def do_register(sock, session_key, seq):
         print("Usuario y contrasena no pueden estar vacios.")
         return seq
 
-    # Hashear password antes de enviar (nunca en texto plano por el socket)
+    # Tema 2: nunca enviar password en texto plano. Se envia SHA-256(password).
+    # El servidor aplica ademas PBKDF2 con salt (key stretching) al almacenar.
     pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
     payload = f"REGISTER{FIELD_SEPARATOR}{username}{FIELD_SEPARATOR}{pw_hash}"
 
@@ -167,7 +172,8 @@ def main():
         sock.connect((HOST, PORT))
         logger.info(f"Conectado a {HOST}:{PORT}")
 
-        # Recibir salt de sesion del servidor para derivar clave
+        # Recibir salt de sesion del servidor para derivar clave con HKDF
+        # (el salt viaja en claro, la seguridad depende de la master key compartida)
         salt_hex = sock.recv(BUFFER_SIZE).decode("utf-8").strip()
         session_salt = bytes.fromhex(salt_hex)
         session_key, _ = generate_session_key(session_salt)

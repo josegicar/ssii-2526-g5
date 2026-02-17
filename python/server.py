@@ -46,6 +46,11 @@ file_lock = threading.Lock()
 
 # ============================================================
 # Integridad de ficheros JSON (HMAC sobre el contenido)
+# Tema 2 - Integridad en almacenamiento / FIM:
+# Mismo principio que Tripwire: se calcula un hash de referencia
+# al guardar y se verifica al cargar. Se usa HMAC (con clave)
+# en lugar de hash simple para que un atacante con acceso al
+# fichero no pueda recalcular el hash tras modificarlo.
 # ============================================================
 
 def _file_hmac(data_bytes: bytes) -> str:
@@ -59,14 +64,14 @@ def _hmac_path(filepath: str) -> str:
 
 
 def load_json_secure(filepath, default):
-    """Carga JSON verificando integridad con HMAC."""
+    """Carga JSON verificando integridad con HMAC. Si el fichero ha sido manipulado, se rechaza."""
     if not os.path.exists(filepath):
         return default
 
     with open(filepath, "r", encoding="utf-8") as f:
         raw = f.read()
 
-    # Verificar integridad OBLIGATORIA con fichero .hmac
+    # Verificar integridad: comparar HMAC almacenado con HMAC recalculado
     hmac_file = _hmac_path(filepath)
     if not os.path.exists(hmac_file):
         logger.critical(f"FICHERO HMAC ELIMINADO para {filepath} - posible ataque")
@@ -75,6 +80,7 @@ def load_json_secure(filepath, default):
     with open(hmac_file, "r") as hf:
         stored_hmac = hf.read().strip()
     computed_hmac = _file_hmac(raw.encode("utf-8"))
+    # Comparacion en tiempo constante (Tema 2: proteccion contra canal lateral)
     if not hmac_mod.compare_digest(stored_hmac, computed_hmac):
         logger.critical(f"INTEGRIDAD VIOLADA en {filepath} - fichero manipulado")
         raise RuntimeError(f"Integridad del fichero {filepath} comprometida")
@@ -135,7 +141,8 @@ def init_preexisting_users():
     ]
 
     for username, password in preexisting:
-        # El cliente envia SHA-256 del password, asi que almacenamos PBKDF2(SHA256(password))
+        # Doble hash: el cliente envia SHA-256(password), el servidor aplica
+        # PBKDF2(SHA-256(password), salt, 100K iteraciones) -> key stretching (Tema 2)
         client_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
         pw_hash, salt = hash_password(client_hash)
         users[username] = {
@@ -149,7 +156,9 @@ def init_preexisting_users():
 
 
 # ============================================================
-# Rate limiting
+# Rate limiting (contra fuerza bruta)
+# Tema 2: complementa al key stretching (PBKDF2) limitando
+# el numero de intentos de login por IP.
 # ============================================================
 
 login_attempts = {}  # {ip: {"count": int, "locked_until": float}}
@@ -200,7 +209,8 @@ def handle_client(conn: socket.socket, addr: tuple):
     client_ip = addr[0]
     logger.info(f"Conexion establecida desde {addr}")
 
-    # Negociar clave de sesion: enviar salt al cliente
+    # Negociar clave de sesion: enviar salt al cliente (el salt es publico,
+    # la seguridad depende de la master key compartida, no del salt)
     session_key, session_salt = generate_session_key()
     conn.sendall(session_salt.hex().encode("utf-8") + b"\n")
 
@@ -234,7 +244,7 @@ def handle_client(conn: socket.socket, addr: tuple):
 
             payload, mac, nonce, seq = unpacked
 
-            # Verificar MAC (contra MiTM)
+            # Verificar MAC (Tema 2: integridad en transmision, contra content modification / MiTM)
             if not verify_mac(payload, nonce, seq, mac, session_key):
                 logger.warning(f"[{addr}] MAC INVALIDO - posible MiTM. Payload: {payload[:50]}")
                 response = pack_message("ERROR|MAC invalido - mensaje rechazado", session_key, server_seq)
@@ -242,7 +252,7 @@ def handle_client(conn: socket.socket, addr: tuple):
                 conn.sendall((response + "\n").encode("utf-8"))
                 continue
 
-            # Verificar NONCE (contra Replay)
+            # Verificar NONCE (Tema 2: contra replay attack)
             nonce_valid, nonce_reason = is_nonce_valid(nonce, used_nonces)
             if not nonce_valid:
                 logger.warning(f"[{addr}] NONCE RECHAZADO: {nonce_reason}")
@@ -251,7 +261,7 @@ def handle_client(conn: socket.socket, addr: tuple):
                 conn.sendall((response + "\n").encode("utf-8"))
                 continue
 
-            # Verificar sequence number (contra reordenacion)
+            # Verificar sequence number (Tema 2: contra sequence modification)
             if seq != expected_seq:
                 logger.warning(f"[{addr}] SEQ incorrecto: esperado {expected_seq}, recibido {seq}")
                 response = pack_message("ERROR|Numero de secuencia incorrecto", session_key, server_seq)

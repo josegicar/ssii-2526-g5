@@ -5,14 +5,13 @@ HOST = "127.0.0.1"
 PORT = 3030
 
 # Clave maestra pre-compartida (256 bits = 32 bytes)
-# Se carga desde fichero .env o variable de entorno (NUNCA hardcodeada en codigo)
+# Tema 2: tamano de clave adecuado para HMAC-SHA256. Se carga desde
+# .env o variable de entorno, nunca hardcodeada en el codigo fuente.
 def _load_master_key():
-    # 1. Intentar variable de entorno
     env_key = os.environ.get("MASTER_KEY")
     if env_key:
         return bytes.fromhex(env_key)
 
-    # 2. Intentar fichero .env
     env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if os.path.exists(env_file):
         with open(env_file, "r") as f:
@@ -35,11 +34,11 @@ TRANSACTIONS_FILE = os.path.join(DATA_DIR, "transactions.json")
 NONCES_FILE = os.path.join(DATA_DIR, "used_nonces.json")
 
 # Seguridad
-NONCE_WINDOW_SECONDS = 300  # 5 minutos
-PBKDF2_ITERATIONS = 100_000
-MAX_LOGIN_ATTEMPTS = 5
-LOCKOUT_SECONDS = 30
-MAX_MESSAGE_SIZE = 4096  # Limite de tamano de mensaje (bytes)
+NONCE_WINDOW_SECONDS = 300      # Ventana temporal de 5 min para validar nonces (contra replay)
+PBKDF2_ITERATIONS = 100_000     # Iteraciones de key stretching (Tema 2: hace costoso cada intento)
+MAX_LOGIN_ATTEMPTS = 5          # Intentos maximos antes de bloqueo (contra fuerza bruta)
+LOCKOUT_SECONDS = 30            # Segundos de bloqueo tras exceder intentos
+MAX_MESSAGE_SIZE = 4096         # Limite de tamano de mensaje (bytes)
 
 # Protocolo
 SEPARATOR = "||"

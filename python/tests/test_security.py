@@ -1,4 +1,12 @@
-"""Tests de seguridad para INTEGRIDOS."""
+"""
+Tests de seguridad para INTEGRIDOS.
+Verifican los mecanismos criptograficos del Tema 2:
+- MAC (integridad en transmision, contra MiTM)
+- NONCE (contra replay attack)
+- PBKDF2 + salt (password integrity, key stretching)
+- HKDF (derivacion de claves de sesion)
+- Comparacion en tiempo constante (contra canal lateral)
+"""
 import sys
 import os
 import time
@@ -14,7 +22,7 @@ from security import (
 
 
 def test_mac_valid():
-    """MAC valido debe verificarse correctamente."""
+    """Tema 2 - MAC: un mensaje legitimo con MAC correcto debe aceptarse."""
     key = os.urandom(32)
     msg = "TRANSACTION|ES123|ES456|200.00"
     nonce = generate_nonce()
@@ -25,7 +33,7 @@ def test_mac_valid():
 
 
 def test_mac_tampered_message():
-    """MAC con mensaje alterado debe fallar (proteccion MiTM)."""
+    """Tema 2 - Content modification / MiTM: si un atacante altera el mensaje, el MAC falla."""
     key = os.urandom(32)
     msg_original = "TRANSACTION|ES123|ES456|200.00"
     msg_alterado = "TRANSACTION|ES123|ES456|2000.00"  # Atacante cambia cantidad
@@ -37,7 +45,7 @@ def test_mac_tampered_message():
 
 
 def test_mac_wrong_key():
-    """MAC con clave incorrecta debe fallar."""
+    """Tema 2 - Key replication: MAC con clave distinta debe rechazarse."""
     key1 = os.urandom(32)
     key2 = os.urandom(32)
     msg = "LOGIN|admin|hash123"
@@ -49,7 +57,7 @@ def test_mac_wrong_key():
 
 
 def test_nonce_replay():
-    """Nonce repetido debe rechazarse (proteccion Replay)."""
+    """Tema 2 - Replay attack: un nonce ya usado debe rechazarse."""
     nonce = generate_nonce()
     used_nonces = {nonce: int(time.time())}
     valid, reason = is_nonce_valid(nonce, used_nonces)
@@ -59,7 +67,7 @@ def test_nonce_replay():
 
 
 def test_nonce_expired():
-    """Nonce con timestamp fuera de ventana debe rechazarse."""
+    """Tema 2 - Timing modification: nonce con timestamp fuera de ventana debe rechazarse."""
     # Crear nonce con timestamp de hace 10 minutos
     old_nonce = f"abc123-{int(time.time()) - 600}"
     used_nonces = {}
@@ -78,7 +86,7 @@ def test_nonce_valid():
 
 
 def test_password_hash_verify():
-    """Password hasheada debe verificarse correctamente."""
+    """Tema 2 - Password integrity: password hasheada con PBKDF2 + salt debe verificarse."""
     password = "miPasswordSegura123!"
     pw_hash, salt = hash_password(password)
     assert verify_password(password, pw_hash, salt), "Password correcta deberia verificarse"
@@ -93,7 +101,7 @@ def test_password_hash_wrong():
 
 
 def test_password_hash_unique_salts():
-    """Cada hash debe usar salt diferente."""
+    """Tema 2 - Salting: cada hash debe usar salt diferente (evita tablas rainbow)."""
     _, salt1 = hash_password("misma_password")
     _, salt2 = hash_password("misma_password")
     assert salt1 != salt2, "Salts deben ser diferentes cada vez"
@@ -101,7 +109,7 @@ def test_password_hash_unique_salts():
 
 
 def test_hkdf_different_salts():
-    """HKDF con salts diferentes debe producir claves diferentes."""
+    """Tema 2 - Key derivation: HKDF con salts diferentes produce claves diferentes (aislamiento de sesion)."""
     master = os.urandom(32)
     key1 = hkdf_derive_key(master, os.urandom(16))
     key2 = hkdf_derive_key(master, os.urandom(16))
@@ -110,7 +118,7 @@ def test_hkdf_different_salts():
 
 
 def test_hkdf_deterministic():
-    """HKDF con mismo salt debe producir misma clave."""
+    """HKDF es determinista: mismo salt + misma master key = misma clave de sesion."""
     master = os.urandom(32)
     salt = os.urandom(16)
     key1 = hkdf_derive_key(master, salt)
@@ -120,7 +128,7 @@ def test_hkdf_deterministic():
 
 
 def test_pack_unpack():
-    """Pack y unpack de mensajes debe ser consistente."""
+    """Tema 2 - Mensaje + MAC + NONCE: empaquetado/desempaquetado debe ser consistente."""
     key = os.urandom(32)
     payload = "LOGIN|admin|hash123"
     packed = pack_message(payload, key, 0)
@@ -134,7 +142,7 @@ def test_pack_unpack():
 
 
 def test_sequence_number_mismatch():
-    """MAC con sequence number incorrecto debe fallar."""
+    """Tema 2 - Sequence modification: MAC con numero de secuencia incorrecto debe fallar."""
     key = os.urandom(32)
     msg = "TRANSACTION|ES123|ES456|100"
     nonce = generate_nonce()
