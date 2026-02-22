@@ -34,8 +34,6 @@ NONCES_FILE = os.path.join(DATA_DIR, "used_nonces.json")
 # Seguridad
 NONCE_WINDOW_SECONDS = 300      # Ventana temporal de 5 min para validar nonces (contra replay)
 PBKDF2_ITERATIONS = 100_000     # Iteraciones de key stretching (Tema 2: hace costoso cada intento)
-MAX_LOGIN_ATTEMPTS = 5          # Intentos maximos antes de bloqueo (contra fuerza bruta)
-LOCKOUT_SECONDS = 30            # Segundos de bloqueo tras exceder intentos
 MAX_MESSAGE_SIZE = 4096         # Limite de tamano de mensaje (bytes)
 
 # Protocolo

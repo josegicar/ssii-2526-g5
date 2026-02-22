@@ -1,11 +1,15 @@
 import socket
 import logging
 import os
+import time
 
 from config import HOST, PORT, BUFFER_SIZE, FIELD_SEPARATOR, LOGS_DIR, MASTER_KEY
-from security import pack_message, unpack_message, verify_mac
+from security import pack_message, unpack_message, verify_mac, is_nonce_valid
 
 os.makedirs(LOGS_DIR, exist_ok=True)
+
+# NONCEs recibidos del servidor en esta sesion (contra replay de respuestas).
+_client_used_nonces = {}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +42,14 @@ def send_secure(sock: socket.socket, payload: str) -> str:
         logger.warning("MAC de respuesta INVALIDO - posible MiTM")
         print("\n[!] ALERTA: MAC invalido en respuesta del servidor. Posible MiTM.\n")
         return None
+
+    # Verifica NONCE de la respuesta contra Replay (lado cliente).
+    nonce_valid, nonce_reason = is_nonce_valid(resp_nonce, _client_used_nonces)
+    if not nonce_valid:
+        logger.warning(f"NONCE de respuesta invalido: {nonce_reason}")
+        print(f"\n[!] ALERTA: {nonce_reason} en respuesta del servidor. Posible Replay.\n")
+        return None
+    _client_used_nonces[resp_nonce] = int(time.time())
 
     return resp_payload
 

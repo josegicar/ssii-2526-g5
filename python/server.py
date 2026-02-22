@@ -8,7 +8,6 @@ import time
 from config import (
     HOST, PORT, BUFFER_SIZE, FIELD_SEPARATOR,
     USERS_FILE, TRANSACTIONS_FILE,
-    MAX_LOGIN_ATTEMPTS, LOCKOUT_SECONDS,
     MAX_MESSAGE_SIZE, MASTER_KEY,
     DATA_DIR, LOGS_DIR
 )
@@ -75,34 +74,6 @@ def init_preexisting_users():
         users[username] = {"password_hash": pw_hash, "salt": salt}
     save_users(users)
     logger.info("Usuarios preexistentes creados")
-
-
-# --- Rate limiting (contra fuerza bruta) ---
-
-login_attempts = {}
-rate_limit_lock = threading.Lock()
-
-def check_rate_limit(client_ip: str) -> tuple:
-    with rate_limit_lock:
-        info = login_attempts.get(client_ip, {})
-        if info.get("locked_until", 0) > time.time():
-            remaining = int(info["locked_until"] - time.time())
-            return False, f"Cuenta bloqueada. Reintente en {remaining}s"
-        if info.get("locked_until", 0) <= time.time() and info.get("count", 0) >= MAX_LOGIN_ATTEMPTS:
-            login_attempts[client_ip] = {"count": 0}
-        return True, ""
-
-def record_failed_login(client_ip: str):
-    with rate_limit_lock:
-        info = login_attempts.setdefault(client_ip, {"count": 0})
-        info["count"] += 1
-        if info["count"] >= MAX_LOGIN_ATTEMPTS:
-            info["locked_until"] = time.time() + LOCKOUT_SECONDS
-            logger.warning(f"IP {client_ip} bloqueada tras {info['count']} intentos fallidos")
-
-def reset_login_attempts(client_ip: str):
-    with rate_limit_lock:
-        login_attempts.pop(client_ip, None)
 
 
 # --- Manejo de cliente ---
@@ -201,16 +172,11 @@ def handle_login(fields: list, client_ip: str) -> str:
     if len(fields) != 3:
         return "ERROR|Formato: LOGIN|username|password"
     username, password = fields[1], fields[2]
-    allowed, msg = check_rate_limit(client_ip)
-    if not allowed:
-        return f"ERROR|{msg}"
     users = load_users()
     user = users.get(username)
     if not user or not verify_password(password, user["password_hash"], user["salt"]):
-        record_failed_login(client_ip)
         logger.warning(f"Login fallido para '{username}' (IP: {client_ip})")
         return "ERROR|Credenciales incorrectas"
-    reset_login_attempts(client_ip)
     logger.info(f"Login exitoso: '{username}' desde {client_ip}")
     return f"OK|Bienvenido {username}"
 
