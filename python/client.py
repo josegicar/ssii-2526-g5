@@ -1,16 +1,9 @@
 import socket
-import hashlib
 import logging
 import os
 
-from config import HOST, PORT, BUFFER_SIZE, FIELD_SEPARATOR, LOGS_DIR
-from security import (
-    generate_session_key, pack_message, unpack_message, verify_mac
-)
-
-# ============================================================
-# Logging
-# ============================================================
+from config import HOST, PORT, BUFFER_SIZE, FIELD_SEPARATOR, LOGS_DIR, MASTER_KEY
+from security import pack_message, unpack_message, verify_mac
 
 os.makedirs(LOGS_DIR, exist_ok=True)
 
@@ -25,132 +18,71 @@ logging.basicConfig(
 logger = logging.getLogger("client")
 
 
-# ============================================================
-# Comunicacion segura
-# Tema 2: cada mensaje se envia con MAC + NONCE + SEQ
-# (esquema recomendado: Mensaje + MAC + NONCE).
-# La verificacion es bidireccional: el cliente tambien
-# valida las respuestas del servidor contra MiTM.
-# ============================================================
+# Envia un mensaje firmado y verifica el MAC de la respuesta (bidireccional contra MiTM).
+def send_secure(sock: socket.socket, payload: str) -> str:
+    sock.sendall((pack_message(payload, MASTER_KEY) + "\n").encode("utf-8"))
 
-def send_secure(sock: socket.socket, payload: str, session_key: bytes, seq: int) -> tuple:
-    """Envia mensaje firmado y recibe respuesta verificada. Retorna (respuesta, nuevo_server_seq)."""
-    message = pack_message(payload, session_key, seq)
-    sock.sendall((message + "\n").encode("utf-8"))
-
-    # Recibir respuesta
     raw = sock.recv(BUFFER_SIZE).decode("utf-8").strip()
     if not raw:
-        return None, 0
+        return None
 
     unpacked = unpack_message(raw)
     if unpacked is None:
         logger.warning("Respuesta del servidor con formato invalido")
-        return None, 0
+        return None
 
-    resp_payload, resp_mac, resp_nonce, resp_seq = unpacked
+    resp_payload, resp_mac, resp_nonce = unpacked
 
-    # Verificar MAC de la respuesta del servidor (verificacion bidireccional contra MiTM)
-    if not verify_mac(resp_payload, resp_nonce, resp_seq, resp_mac, session_key):
-        logger.warning("MAC de respuesta del servidor INVALIDO - posible MiTM")
-        print("\n[!] ALERTA: La respuesta del servidor tiene MAC invalido.")
-        print("[!] Posible ataque Man-in-the-Middle. Conexion no fiable.\n")
-        return None, resp_seq
+    # Secure Comparator: verifica MAC de la respuesta contra MiTM.
+    if not verify_mac(resp_payload, resp_nonce, resp_mac, MASTER_KEY):
+        logger.warning("MAC de respuesta INVALIDO - posible MiTM")
+        print("\n[!] ALERTA: MAC invalido en respuesta del servidor. Posible MiTM.\n")
+        return None
 
-    return resp_payload, resp_seq
+    return resp_payload
 
 
-# ============================================================
-# Funciones del menu
-# ============================================================
+def print_response(response: str, accion: str):
+    if response:
+        parts = response.split(FIELD_SEPARATOR, 1)
+        print(f"[{parts[0]}] {parts[1] if len(parts) > 1 else ''}")
+        logger.info(f"{accion}: {response}")
 
-def do_register(sock, session_key, seq):
+
+def do_register(sock):
     print("\n--- REGISTRO ---")
     username = input("Nombre de usuario: ").strip()
     password = input("Contrasena: ").strip()
-
     if not username or not password:
         print("Usuario y contrasena no pueden estar vacios.")
-        return seq
-
-    # Tema 2: nunca enviar password en texto plano. Se envia SHA-256(password).
-    # El servidor aplica ademas PBKDF2 con salt (key stretching) al almacenar.
-    pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    payload = f"REGISTER{FIELD_SEPARATOR}{username}{FIELD_SEPARATOR}{pw_hash}"
-
-    response, _ = send_secure(sock, payload, session_key, seq)
-    if response:
-        parts = response.split(FIELD_SEPARATOR, 1)
-        status = parts[0]
-        msg = parts[1] if len(parts) > 1 else ""
-        print(f"[{status}] {msg}")
-        logger.info(f"Registro: {status} - {msg}")
-
-    return seq + 1
+        return
+    print_response(send_secure(sock, f"REGISTER{FIELD_SEPARATOR}{username}{FIELD_SEPARATOR}{password}"), "Registro")
 
 
-def do_login(sock, session_key, seq):
+def do_login(sock):
     print("\n--- INICIO DE SESION ---")
     username = input("Nombre de usuario: ").strip()
     password = input("Contrasena: ").strip()
-
     if not username or not password:
         print("Usuario y contrasena no pueden estar vacios.")
-        return seq
-
-    pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    payload = f"LOGIN{FIELD_SEPARATOR}{username}{FIELD_SEPARATOR}{pw_hash}"
-
-    response, _ = send_secure(sock, payload, session_key, seq)
-    if response:
-        parts = response.split(FIELD_SEPARATOR, 1)
-        status = parts[0]
-        msg = parts[1] if len(parts) > 1 else ""
-        print(f"[{status}] {msg}")
-        logger.info(f"Login: {status} - {msg}")
-
-    return seq + 1
+        return
+    print_response(send_secure(sock, f"LOGIN{FIELD_SEPARATOR}{username}{FIELD_SEPARATOR}{password}"), "Login")
 
 
-def do_transaction(sock, session_key, seq):
+def do_transaction(sock):
     print("\n--- NUEVA TRANSACCION ---")
     cuenta_orig = input("Cuenta origen: ").strip()
     cuenta_dest = input("Cuenta destino: ").strip()
     cantidad = input("Cantidad (EUR): ").strip()
-
     if not cuenta_orig or not cuenta_dest or not cantidad:
         print("Todos los campos son obligatorios.")
-        return seq
-
-    payload = f"TRANSACTION{FIELD_SEPARATOR}{cuenta_orig}{FIELD_SEPARATOR}{cuenta_dest}{FIELD_SEPARATOR}{cantidad}"
-
-    response, _ = send_secure(sock, payload, session_key, seq)
-    if response:
-        parts = response.split(FIELD_SEPARATOR, 1)
-        status = parts[0]
-        msg = parts[1] if len(parts) > 1 else ""
-        print(f"[{status}] {msg}")
-        logger.info(f"Transaccion: {status} - {msg}")
-
-    return seq + 1
+        return
+    print_response(send_secure(sock, f"TRANSACTION{FIELD_SEPARATOR}{cuenta_orig}{FIELD_SEPARATOR}{cuenta_dest}{FIELD_SEPARATOR}{cantidad}"), "Transaccion")
 
 
-def do_logout(sock, session_key, seq):
-    payload = "LOGOUT"
-    response, _ = send_secure(sock, payload, session_key, seq)
-    if response:
-        parts = response.split(FIELD_SEPARATOR, 1)
-        status = parts[0]
-        msg = parts[1] if len(parts) > 1 else ""
-        print(f"[{status}] {msg}")
-        logger.info(f"Logout: {status} - {msg}")
+def do_logout(sock):
+    print_response(send_secure(sock, "LOGOUT"), "Logout")
 
-    return seq + 1
-
-
-# ============================================================
-# Menu principal
-# ============================================================
 
 def show_menu():
     print("\n========================================")
@@ -165,37 +97,23 @@ def show_menu():
 
 
 def main():
-    print("Conectando al servidor...")
-
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((HOST, PORT))
         logger.info(f"Conectado a {HOST}:{PORT}")
-
-        # Recibir salt de sesion del servidor para derivar clave con HKDF
-        # (el salt viaja en claro, la seguridad depende de la master key compartida)
-        salt_hex = sock.recv(BUFFER_SIZE).decode("utf-8").strip()
-        session_salt = bytes.fromhex(salt_hex)
-        session_key, _ = generate_session_key(session_salt)
-        logger.info("Clave de sesion derivada correctamente")
-
-        print(f"Conectado al servidor {HOST}:{PORT}")
-        print("Clave de sesion establecida.\n")
-
-        seq = 0
+        print(f"Conectado al servidor {HOST}:{PORT}\n")
 
         while True:
             show_menu()
             option = input("Seleccione opcion: ").strip()
-
             if option == "1":
-                seq = do_register(sock, session_key, seq)
+                do_register(sock)
             elif option == "2":
-                seq = do_login(sock, session_key, seq)
+                do_login(sock)
             elif option == "3":
-                seq = do_transaction(sock, session_key, seq)
+                do_transaction(sock)
             elif option == "4":
-                seq = do_logout(sock, session_key, seq)
+                do_logout(sock)
             elif option == "5":
                 print("Desconectando...")
                 break
@@ -203,8 +121,7 @@ def main():
                 print("Opcion no valida.")
 
     except ConnectionRefusedError:
-        print(f"Error: No se pudo conectar al servidor en {HOST}:{PORT}")
-        print("Asegurese de que el servidor esta en ejecucion.")
+        print(f"Error: No se pudo conectar a {HOST}:{PORT}. Asegurese de que el servidor esta en ejecucion.")
     except Exception as e:
         logger.error(f"Error: {e}")
         print(f"Error: {e}")

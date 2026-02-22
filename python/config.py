@@ -4,9 +4,7 @@ import os
 HOST = "127.0.0.1"
 PORT = 3030
 
-# Clave maestra pre-compartida (256 bits = 32 bytes)
-# Tema 2: tamano de clave adecuado para HMAC-SHA256. Se carga desde
-# .env o variable de entorno, nunca hardcodeada en el codigo fuente.
+# Se carga la clave maestra pre-compartida (256 bits).
 def _load_master_key():
     env_key = os.environ.get("MASTER_KEY")
     if env_key:
